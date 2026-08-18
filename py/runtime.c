@@ -1619,9 +1619,13 @@ void mp_import_all(mp_obj_t module) {
     #endif
 
     #if MICROPY_CPYTHON_COMPAT
-    // Load the dict from the module.  In MicroPython, if __dict__ is
-    // available then it always returns a native mp_obj_dict_t instance.
+    // Load the dict from the module.  This is usually a native mp_obj_dict_t
+    // instance, but an instance attribute named __dict__ shadows the one that
+    // instance_attr() creates, and such an attribute can be any object.
     mp_load_method(module, MP_QSTR___dict__, dest);
+    if (!mp_obj_is_dict_or_ordereddict(dest[0])) {
+        mp_raise_TypeError(MP_ERROR_TEXT("__dict__ isn't a dict"));
+    }
     #else
     // Without MICROPY_CPYTHON_COMPAT __dict__ is not available, so just
     // assume the given module is actually an mp_obj_module_t instance.

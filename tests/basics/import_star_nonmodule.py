@@ -63,3 +63,26 @@ try:
     # MicroPython raises AttributeError, CPython raises ImportError.
 except (AttributeError, ImportError):
     print("ImportError")
+
+print("== test with a __dict__ that isn't a dict ==")
+
+
+class M:
+    pass
+
+
+m = M()
+try:
+    m.__dict__ = 42
+except TypeError:
+    # CPython rejects the assignment to __dict__.
+    print("TypeError")
+else:
+    # MicroPython allows the assignment, but "import *" must reject the value.
+    sys.modules["mod"] = m
+    try:
+        from mod import *
+
+        print("no error")
+    except TypeError:
+        print("TypeError")
