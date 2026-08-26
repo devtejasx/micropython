@@ -233,6 +233,16 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
 
     // map is a hash table (not an ordered array), so do a hash lookup
 
+    // __hash__ and __eq__ below can run arbitrary Python code, which may clear
+    // or resize this very map and free the table this lookup is walking.  The
+    // table and alloc are therefore re-read after each such call and the lookup
+    // restarted if they changed; otherwise a map cleared part-way through makes
+    // "% map->alloc" divide by zero and leaves slot pointing into freed memory.
+    mp_uint_t hash;
+    size_t pos, start_pos, alloc;
+    mp_map_elem_t *table, *avail_slot;
+
+restart:
     if (map->alloc == 0) {
         if (lookup_kind == MP_MAP_LOOKUP_ADD_IF_NOT_FOUND) {
             mp_map_rehash(map);
@@ -242,16 +252,21 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
     }
 
     // get hash of index, with fast path for common case of qstr
-    mp_uint_t hash;
     if (mp_obj_is_qstr(index)) {
         hash = qstr_hash(MP_OBJ_QSTR_VALUE(index));
     } else {
         hash = MP_OBJ_SMALL_INT_VALUE(mp_unary_op(MP_UNARY_OP_HASH, index));
+        if (map->alloc == 0) {
+            // __hash__ cleared the map
+            goto restart;
+        }
     }
 
-    size_t pos = hash % map->alloc;
-    size_t start_pos = pos;
-    mp_map_elem_t *avail_slot = NULL;
+    table = map->table;
+    alloc = map->alloc;
+    pos = hash % alloc;
+    start_pos = pos;
+    avail_slot = NULL;
     for (;;) {
         mp_map_elem_t *slot = &map->table[pos];
         if (slot->key == MP_OBJ_NULL) {
@@ -275,26 +290,37 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
             if (avail_slot == NULL) {
                 avail_slot = slot;
             }
-        } else if (slot->key == index || (!compare_only_ptrs && mp_obj_equal(slot->key, index))) {
-            // found index
-            // Note: CPython does not replace the index; try x={True:'true'};x[1]='one';x
-            if (lookup_kind == MP_MAP_LOOKUP_REMOVE_IF_FOUND) {
-                // delete element in this slot
-                map->used--;
-                if (map->table[(pos + 1) % map->alloc].key == MP_OBJ_NULL) {
-                    // optimisation if next slot is empty
-                    slot->key = MP_OBJ_NULL;
-                } else {
-                    slot->key = MP_OBJ_SENTINEL;
+        } else {
+            bool found = slot->key == index;
+            if (!found && !compare_only_ptrs) {
+                found = mp_obj_equal(slot->key, index);
+                if (map->table != table || map->alloc != alloc) {
+                    // __eq__ mutated this map, so table, pos, slot and
+                    // avail_slot are all stale; search the new table instead
+                    goto restart;
                 }
-                // keep slot->value so that caller can access it if needed
             }
-            MAP_CACHE_SET(index, pos);
-            return slot;
+            if (found) {
+                // found index
+                // Note: CPython does not replace the index; try x={True:'true'};x[1]='one';x
+                if (lookup_kind == MP_MAP_LOOKUP_REMOVE_IF_FOUND) {
+                    // delete element in this slot
+                    map->used--;
+                    if (map->table[(pos + 1) % map->alloc].key == MP_OBJ_NULL) {
+                        // optimisation if next slot is empty
+                        slot->key = MP_OBJ_NULL;
+                    } else {
+                        slot->key = MP_OBJ_SENTINEL;
+                    }
+                    // keep slot->value so that caller can access it if needed
+                }
+                MAP_CACHE_SET(index, pos);
+                return slot;
+            }
         }
 
         // not yet found, keep searching in this table
-        pos = (pos + 1) % map->alloc;
+        pos = (pos + 1) % alloc;
 
         if (pos == start_pos) {
             // search got back to starting position, so index is not in table
@@ -312,7 +338,9 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
                     // not enough room in table, rehash it
                     mp_map_rehash(map);
                     // restart the search for the new element
-                    start_pos = pos = hash % map->alloc;
+                    table = map->table;
+                    alloc = map->alloc;
+                    start_pos = pos = hash % alloc;
                 }
             } else {
                 return NULL;
