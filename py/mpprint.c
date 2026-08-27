@@ -366,8 +366,55 @@ int mp_print_mp_int(const mp_print_t *print, mp_obj_t x, unsigned int base, int 
 }
 
 #if MICROPY_PY_BUILTINS_FLOAT
+// Longest plain-decimal run mp_format_float produces for this buffer; holding
+// it fixed means widening the buffer for separators cannot make the formatted
+// number itself any longer.
+#define FLOAT_FORMAT_LEN (33)
+// A separator goes after every three integer digits.
+#define FLOAT_SEP_MAX ((FLOAT_FORMAT_LEN - 1) / 3)
+
+// Inserts the digit separator requested by a "," or "_" in the format spec into
+// the integer part of an already formatted number, in place, and returns the
+// new length. buf must have room for FLOAT_SEP_MAX more characters.
+static int mp_format_insert_separators(char *buf, int len, char separator) {
+    int start = (buf[0] < '0' || buf[0] > '9') ? 1 : 0;
+    int end = start;
+    while (end < len && buf[end] >= '0' && buf[end] <= '9') {
+        end++;
+    }
+    // Anything that is not a plain decimal number has no integer part to group:
+    // inf and nan, and exponent form, where the run of digits is followed by an
+    // "e" rather than a decimal point or the end of the number.
+    if (end < len && buf[end] != '.' && buf[end] != '%') {
+        return len;
+    }
+
+    int separators = (end - start - 1) / 3;
+    if (separators <= 0) {
+        return len;
+    }
+
+    // Shift the fractional part and the terminating null right to make room,
+    // then walk the integer digits backwards inserting a separator every three.
+    memmove(buf + end + separators, buf + end, (size_t)(len - end + 1));
+
+    int src = end - 1;
+    int dst = end + separators - 1;
+    int run = 0;
+    while (src >= start) {
+        buf[dst--] = buf[src--];
+        if (++run == 3 && src >= start) {
+            buf[dst--] = separator;
+            run = 0;
+        }
+    }
+
+    return len + separators;
+}
+
 int mp_print_float(const mp_print_t *print, mp_float_t f, char fmt, unsigned int flags, char fill, int width, int prec) {
-    char buf[36];
+    // Three spare for a trailing ".0" or "%" and the terminating null.
+    char buf[FLOAT_FORMAT_LEN + FLOAT_SEP_MAX + 3];
     char sign = '\0';
     int chrs = 0;
 
@@ -378,7 +425,7 @@ int mp_print_float(const mp_print_t *print, mp_float_t f, char fmt, unsigned int
         sign = ' ';
     }
 
-    int len = mp_format_float(f, buf, sizeof(buf) - 3, fmt, prec, sign);
+    int len = mp_format_float(f, buf, FLOAT_FORMAT_LEN, fmt, prec, sign);
 
     char *s = buf;
 
@@ -391,6 +438,15 @@ int mp_print_float(const mp_print_t *print, mp_float_t f, char fmt, unsigned int
     if (flags & PF_FLAG_ADD_PERCENT) {
         buf[len++] = '%';
         buf[len] = '\0';
+    }
+
+    char separator = flags >> PF_FLAG_SEP_POS;
+    if (separator) {
+        len = mp_format_insert_separators(buf, len, separator);
+        // The separators are in the buffer now, so stop mp_print_strn grouping
+        // the zero padding too: it counts only the characters it adds and would
+        // restart the run without knowing about the digits already grouped.
+        flags &= ~((unsigned)separator << PF_FLAG_SEP_POS);
     }
 
     // buf[0] < '0' returns true if the first character is space, + or -

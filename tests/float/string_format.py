@@ -43,3 +43,29 @@ try:
     "{:10.1b}".format(0.0)
 except ValueError:
     print("ValueError")
+
+# Digit separators in a float format spec. These were parsed and then dropped,
+# so the number came out ungrouped.
+print("{:,.1f}".format(1234.5))
+print("{:,.2f}".format(1234.56789))
+print("{:,.1f}".format(1234567.5))
+print("{:,.2f}".format(-1234567.25))
+print("{:,.3f}".format(1234567890.125))
+print("{:_.1f}".format(1234.5))
+print("{:,.1f}".format(123.5))
+print("{:,.1f}".format(0.5))
+print("{:,.1f}".format(-0.5))
+print("{:,.1f}".format(1e20))
+print("{:,.1%}".format(1234.5))
+
+# Nothing to group, and nothing that looks like an integer part to mangle.
+print("{:,e}".format(1234.5))
+print("{:,}".format(float("inf")))
+print("{:,}".format(float("-inf")))
+print("{:,}".format(float("nan")))
+
+# Grouping composes with sign and alignment.
+print("{:+,.1f}".format(1234.5))
+print("{:>15,.1f}".format(1234.5))
+print("{:<15,.1f}".format(1234.5))
+print("{:^15,.1f}".format(1234.5))
