@@ -2164,13 +2164,22 @@ static void compile_namedexpr_helper(compiler_t *comp, mp_parse_node_t pn_name, 
     if (comp->pass == MP_PASS_SCOPE && SCOPE_IS_COMP_LIKE(comp->scope_cur->kind)) {
         id_info_t *id_info_parent = mp_emit_common_get_id_for_modification(comp->scope_cur->parent, target);
         if (id_info_parent->kind == ID_INFO_KIND_GLOBAL_EXPLICIT) {
-            scope_find_or_add_id(comp->scope_cur, target, ID_INFO_KIND_GLOBAL_EXPLICIT);
+            id_info_t *id_info = scope_find_or_add_id(comp->scope_cur, target, ID_INFO_KIND_GLOBAL_EXPLICIT);
+            if (id_info->kind == ID_INFO_KIND_GLOBAL_IMPLICIT) {
+                // The target was already referenced in this comprehension, so the entry
+                // existed and scope_find_or_add_id() returned it with its original kind.
+                // The parent declares the name global, so this scope must agree.
+                id_info->kind = ID_INFO_KIND_GLOBAL_EXPLICIT;
+            }
         } else {
             id_info_t *id_info = scope_find_or_add_id(comp->scope_cur, target, ID_INFO_KIND_UNDECIDED);
             bool is_global = comp->scope_cur->parent->parent == NULL; // comprehension is defined in outer scope
-            if (!is_global && id_info->kind == ID_INFO_KIND_GLOBAL_IMPLICIT) {
-                // Variable was already referenced but now needs to be closed over, so reset the kind
-                // such that scope_check_to_close_over() is called in compile_declare_nonlocal().
+            if (id_info->kind == ID_INFO_KIND_GLOBAL_IMPLICIT) {
+                // Variable was already referenced in this comprehension, eg the target also
+                // appears on the right-hand side.  Reset the kind so that the declaration
+                // below is accepted: compile_declare_nonlocal() needs it to call
+                // scope_check_to_close_over(), and compile_declare_global() rejects anything
+                // that is neither undecided nor already an explicit global.
                 id_info->kind = ID_INFO_KIND_UNDECIDED;
             }
             compile_declare_global_or_nonlocal(comp, pn_name, id_info, is_global);

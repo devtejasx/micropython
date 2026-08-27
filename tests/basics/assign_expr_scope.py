@@ -79,3 +79,31 @@ def scope5():
 print("scope5")
 scope5()
 print(globals().get("var5", None))
+
+# Test that a target which is also read on the right-hand side still binds in
+# the parent scope, at module level.
+var6 = 0
+print("scope6")
+print([(var6 := var6 + 1) for _ in range(3)])
+print(var6)
+
+# Same, but where the parent scope declares the name global.
+def scope7():
+    global var7
+    var7 = 0
+    print([(var7 := var7 + 1) for _ in range(3)])
+    print(var7)
+
+print("scope7")
+scope7()
+print(globals().get("var7", None))
+
+# Same, but where the target is closed over rather than global.
+def scope8():
+    var8 = 0
+    print([(var8 := var8 + 1) for _ in range(3)])
+    print(var8)
+
+print("scope8")
+scope8()
+print(globals().get("var8", None))
