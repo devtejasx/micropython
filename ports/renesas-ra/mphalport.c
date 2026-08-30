@@ -170,7 +170,13 @@ void mp_hal_get_mac_ascii(int idx, size_t chr_off, size_t chr_len, char *dest) {
     uint8_t mac[6];
     mp_hal_get_mac(idx, mac);
     for (; chr_len; ++chr_off, --chr_len) {
-        *dest++ = hexchr[mac[chr_off >> 1] >> (4 * (1 - (chr_off & 1))) & 0xf];
+        // A MAC address is 6 bytes, ie 12 hex characters.  Pad anything the
+        // caller asks for beyond that, rather than reading past `mac`.
+        if (chr_off < 2 * sizeof(mac)) {
+            *dest++ = hexchr[mac[chr_off >> 1] >> (4 * (1 - (chr_off & 1))) & 0xf];
+        } else {
+            *dest++ = '0';
+        }
     }
 }
 
