@@ -23,6 +23,13 @@ print(pow(3, 0, -5))
 print(pow(-3, 0, -5))
 print(pow(3, 4, -5))
 
+# bool is a subclass of int, and is accepted in every position
+print(pow(True, 1, 5))
+print(pow(2, True, 5))
+print(pow(7, 3, True))
+print(pow(False, 1, 5))
+print(pow(2, False, 5))
+
 # 3 arg pow is defined to only work on integers
 try:
     print(pow("x", 5, 6))
