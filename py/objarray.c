@@ -33,6 +33,7 @@
 #include "py/binary.h"
 #include "py/objstr.h"
 #include "py/objarray.h"
+#include "py/gc.h"
 
 #if MICROPY_PY_ARRAY || MICROPY_PY_BUILTINS_BYTEARRAY || MICROPY_PY_BUILTINS_MEMORYVIEW
 
@@ -65,6 +66,21 @@ static mp_obj_t array_iterator_new(mp_obj_t array_in, mp_obj_iter_buf_t *iter_bu
 static mp_obj_t array_append(mp_obj_t self_in, mp_obj_t arg);
 static mp_obj_t array_extend(mp_obj_t self_in, mp_obj_t arg_in);
 static mp_int_t array_get_buffer(mp_obj_t o_in, mp_buffer_info_t *bufinfo, mp_uint_t flags);
+
+// An array's items can belong to something other than the GC heap: the temporary
+// the IOBase stream adaptor hands to a Python read/write method wraps the C
+// caller's buffer, and mp_obj_new_bytearray_by_ref does the same for an
+// arbitrary pointer. Those objects are views with a bytearray's methods, so a
+// resize would m_renew a pointer the allocator never handed out. Refuse instead.
+static void array_check_can_resize(mp_obj_array_t *o) {
+    #if MICROPY_ENABLE_GC
+    if (o->items != NULL && gc_nbytes(o->items) == 0) {
+        mp_raise_ValueError(MP_ERROR_TEXT("array does not own its buffer"));
+    }
+    #else
+    (void)o;
+    #endif
+}
 
 /******************************************************************************/
 // array
@@ -395,6 +411,7 @@ static mp_obj_t array_append(mp_obj_t self_in, mp_obj_t arg) {
     mp_obj_array_t *self = MP_OBJ_TO_PTR(self_in);
 
     if (self->free == 0) {
+        array_check_can_resize(self);
         size_t item_sz = mp_binary_get_size('@', self->typecode, NULL);
         // TODO: alloc policy
         size_t add_cnt = 8;
@@ -431,6 +448,7 @@ static mp_obj_t array_extend(mp_obj_t self_in, mp_obj_t arg_in) {
     // make sure we have enough room to extend
     // TODO: alloc policy; at the moment we go conservative
     if (self->free < len) {
+        array_check_can_resize(self);
         self->items = m_renew(byte, self->items, (self->len + self->free) * sz, (self->len + len) * sz);
         self->free = 0;
 
@@ -518,6 +536,7 @@ static mp_obj_t array_subscr(mp_obj_t self_in, mp_obj_t index_in, mp_obj_t value
                 #endif
                 if (len_adj > 0) {
                     if ((size_t)len_adj > o->free) {
+                        array_check_can_resize(o);
                         // TODO: alloc policy; at the moment we go conservative
                         o->items = m_renew(byte, o->items, (o->len + o->free) * item_sz, (o->len + len_adj) * item_sz);
                         o->free = len_adj;

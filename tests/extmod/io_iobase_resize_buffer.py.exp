@@ -1,0 +1,3 @@
+InPlaceAdd ValueError array does not own its buffer
+GrowingSlice ValueError array does not own its buffer
+b'[1, 2]'
