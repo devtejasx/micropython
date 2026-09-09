@@ -710,6 +710,13 @@ static bool skip_whitespace(mp_lexer_t *lex, bool stop_at_newline) {
             }
             // will return true on next loop
         } else if (is_char_and(lex, '\\', '\n')) {
+            if (lex->chr2 == MP_LEXER_EOF) {
+                // A line continuation with nothing after its newline has
+                // nothing to continue onto.  Swallowing it would also swallow
+                // the newline that terminates the statement, so leave the
+                // backslash to be lexed as an invalid token.
+                break;
+            }
             // line-continuation, so don't return true
             next_char(lex);
             next_char(lex);
