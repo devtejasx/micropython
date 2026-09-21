@@ -279,6 +279,15 @@ static mp_obj_t fun_bc_call(mp_obj_t self_in, size_t n_args, size_t n_kw, const 
         #endif
     }
     if (code_state == NULL) {
+        #if MICROPY_STACK_CHECK
+        // The heap could not provide the state (it is full, or locked), so it
+        // must go on the C stack. A large function can need far more than
+        // the stack has left, and alloca cannot fail, so check the size here
+        // rather than let the VM write past the end of the stack.
+        if (mp_cstack_usage() + offsetof(mp_code_state_t, state) + state_size >= MP_STATE_THREAD(stack_limit)) {
+            mp_raise_recursion_depth();
+        }
+        #endif
         code_state = alloca(offsetof(mp_code_state_t, state) + state_size);
         #if MICROPY_DEBUG_VM_STACK_OVERFLOW
         memset(code_state->state, 0, state_size);
