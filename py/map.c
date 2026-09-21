@@ -153,6 +153,15 @@ static void mp_map_rehash(mp_map_t *map) {
 //  - returns slot, with key non-null and value=MP_OBJ_NULL if it was added
 // MP_MAP_LOOKUP_REMOVE_IF_FOUND behaviour:
 //  - returns NULL if not found, else the slot if was found in with key null and value non-null
+// Compare two keys with mp_obj_equal. That can run a user-defined __eq__, which
+// may modify the map being searched; a match is only reported if the table is
+// still the one the caller was searching.
+static bool map_equal_keys(mp_map_t *map, mp_obj_t key, mp_obj_t index) {
+    mp_map_elem_t *table = map->table;
+    bool equal = mp_obj_equal(key, index);
+    return equal && map->table == table;
+}
+
 mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_t index, mp_map_lookup_kind_t lookup_kind) {
     // If the map is a fixed array then we must only be called for a lookup
     assert(!map->is_fixed || lookup_kind == MP_MAP_LOOKUP);
@@ -190,14 +199,25 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
 
     // if the map is an ordered array then we must do a brute force linear search
     if (map->is_ordered) {
-        for (mp_map_elem_t *elem = &map->table[0], *top = &map->table[map->used]; elem < top; elem++) {
-            if (elem->key == index || (!compare_only_ptrs && mp_obj_equal(elem->key, index))) {
+    ordered_restart:
+        for (size_t i = 0; i < map->used; i++) {
+            mp_map_elem_t *elem = &map->table[i];
+            bool found = elem->key == index;
+            if (!found && !compare_only_ptrs) {
+                mp_map_elem_t *table = map->table;
+                found = mp_obj_equal(elem->key, index);
+                if (map->table != table || map->used <= i) {
+                    // The key's __eq__ changed the map, so start the search again.
+                    goto ordered_restart;
+                }
+            }
+            if (found) {
                 #if MICROPY_PY_COLLECTIONS_ORDEREDDICT
                 if (MP_UNLIKELY(lookup_kind == MP_MAP_LOOKUP_REMOVE_IF_FOUND)) {
                     // remove the found element by moving the rest of the array down
                     mp_obj_t value = elem->value;
                     --map->used;
-                    memmove(elem, elem + 1, (top - elem - 1) * sizeof(*elem));
+                    memmove(elem, elem + 1, (map->used - i) * sizeof(*elem));
                     // put the found element after the end so the caller can access it if needed
                     // note: caller must NULL the value so the GC can clean up (e.g. see dict_get_helper).
                     elem = &map->table[map->used];
@@ -252,6 +272,7 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
     size_t pos = hash % map->alloc;
     size_t start_pos = pos;
     mp_map_elem_t *avail_slot = NULL;
+    mp_map_elem_t *table = map->table;
     for (;;) {
         mp_map_elem_t *slot = &map->table[pos];
         if (slot->key == MP_OBJ_NULL) {
@@ -275,7 +296,7 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
             if (avail_slot == NULL) {
                 avail_slot = slot;
             }
-        } else if (slot->key == index || (!compare_only_ptrs && mp_obj_equal(slot->key, index))) {
+        } else if (slot->key == index || (!compare_only_ptrs && map_equal_keys(map, slot->key, index))) {
             // found index
             // Note: CPython does not replace the index; try x={True:'true'};x[1]='one';x
             if (lookup_kind == MP_MAP_LOOKUP_REMOVE_IF_FOUND) {
@@ -291,6 +312,21 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
             }
             MAP_CACHE_SET(index, pos);
             return slot;
+        }
+
+        if (map->table != table) {
+            // A key's __eq__ cleared or resized the map while we searched it, so
+            // pos and avail_slot are stale: start the search again.
+            if (map->alloc == 0) {
+                if (lookup_kind != MP_MAP_LOOKUP_ADD_IF_NOT_FOUND) {
+                    return NULL;
+                }
+                mp_map_rehash(map);
+            }
+            table = map->table;
+            avail_slot = NULL;
+            start_pos = pos = hash % map->alloc;
+            continue;
         }
 
         // not yet found, keep searching in this table
@@ -311,6 +347,7 @@ mp_map_elem_t *MICROPY_WRAP_MP_MAP_LOOKUP(mp_map_lookup)(mp_map_t * map, mp_obj_
                 } else {
                     // not enough room in table, rehash it
                     mp_map_rehash(map);
+                    table = map->table;
                     // restart the search for the new element
                     start_pos = pos = hash % map->alloc;
                 }
