@@ -419,6 +419,11 @@ void mp_emit_bc_adjust_stack_size(emit_t *emit, mp_int_t delta) {
     }
     assert((mp_int_t)emit->stack_size + delta >= 0);
     emit->stack_size += delta;
+    if (emit->stack_size > UINT16_MAX) {
+        // scope->stack_size cannot hold this, and a truncated value would give
+        // the function too little state for its VM stack.
+        emit->overflow = true;
+    }
     if (emit->stack_size > emit->scope->stack_size) {
         emit->scope->stack_size = emit->stack_size;
     }
