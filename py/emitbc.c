@@ -244,7 +244,9 @@ static void emit_write_bytecode_byte_label(emit_t *emit, int stack_adj, byte b1,
     // Compute the jump size and offset only when code size is known.
     if (emit->pass >= MP_PASS_CODE_SIZE) {
         // The -2 accounts for this jump opcode taking 2 bytes (at least).
-        bytecode_offset = emit->label_offsets[label] - emit->bytecode_offset - 2;
+        // Subtract as signed: a backward jump is negative, and if size_t is narrower
+        // than ssize_t an unsigned difference would not wrap back to a negative value.
+        bytecode_offset = (ssize_t)emit->label_offsets[label] - (ssize_t)emit->bytecode_offset - 2;
 
         // Check if the bytecode_offset is small enough to use a 1-byte encoding.
         if ((is_signed && -64 <= bytecode_offset && bytecode_offset <= 63)
