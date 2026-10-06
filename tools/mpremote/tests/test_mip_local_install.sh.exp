@@ -9,3 +9,10 @@ Done
 
 ---- Test package
 Hello, world!
+
+---- Install package to a target with a leading colon
+mkdir :/__ramdisk/lib2
+Install ${TMP}/example/package.json
+Installing: /__ramdisk/lib2/mip_example/__init__.py
+Installing: /__ramdisk/lib2/mip_example/hello.py
+Done

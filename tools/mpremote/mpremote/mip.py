@@ -178,6 +178,11 @@ def do_mip(state, args):
             if args.index is None:
                 args.index = _PACKAGE_INDEX
 
+            if args.target is not None and args.target.startswith(":"):
+                # The target is always a remote path. Strip the leading ':'
+                # if the user included it, as the filesystem commands do.
+                args.target = args.target[1:] or "."
+
             if args.target is None:
                 state.transport.exec("import sys")
                 lib_paths = [

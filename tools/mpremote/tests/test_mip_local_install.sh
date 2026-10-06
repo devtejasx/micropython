@@ -40,3 +40,7 @@ echo
 echo ---- Test package
 $MPREMOTE exec "import sys; sys.path.append(\"${target}/lib\")"
 $MPREMOTE exec "import ${PACKAGE}; ${PACKAGE}.hello()"
+echo
+echo ---- Install package to a target with a leading colon
+$MPREMOTE mkdir ${target}/lib2
+$MPREMOTE mip install --target=:${target}/lib2 ${PACKAGE_DIR}/package.json
