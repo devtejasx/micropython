@@ -25,6 +25,7 @@
 # THE SOFTWARE.
 
 import io
+import math
 import struct
 import sys
 from binascii import hexlify
@@ -793,8 +794,8 @@ class CompiledModule:
                 "#if MICROPY_OBJ_REPR == MICROPY_OBJ_REPR_A || MICROPY_OBJ_REPR == MICROPY_OBJ_REPR_B"
             )
             print(
-                "static const mp_obj_float_t %s = {{&mp_type_float}, (mp_float_t)%.16g};"
-                % (obj_name, obj)
+                "static const mp_obj_float_t %s = {{&mp_type_float}, %s};"
+                % (obj_name, float_to_c(obj))
             )
             print("#define %s MP_ROM_PTR(&%s)" % (macro_name, obj_name))
             print("#elif MICROPY_OBJ_REPR == MICROPY_OBJ_REPR_C")
@@ -810,8 +811,8 @@ class CompiledModule:
             return macro_name
         elif isinstance(obj, complex):
             print(
-                "static const mp_obj_complex_t %s = {{&mp_type_complex}, (mp_float_t)%.16g, (mp_float_t)%.16g};"
-                % (obj_name, obj.real, obj.imag)
+                "static const mp_obj_complex_t %s = {{&mp_type_complex}, %s, %s};"
+                % (obj_name, float_to_c(obj.real), float_to_c(obj.imag))
             )
             return "MP_ROM_PTR(&%s)" % obj_name
         elif type(obj) is tuple:
@@ -867,6 +868,15 @@ class CompiledModule:
 
         global const_table_ptr_content
         const_table_ptr_content += len(self.obj_table)
+
+
+def float_to_c(f):
+    # Return a C constant expression for the float f; inf and nan have no literal form.
+    if math.isnan(f):
+        return "(mp_float_t)NAN"
+    if math.isinf(f):
+        return "(mp_float_t)INFINITY" if f > 0 else "(-(mp_float_t)INFINITY)"
+    return "(mp_float_t)%.16g" % f
 
 
 class RawCode(object):
@@ -1618,6 +1628,14 @@ def freeze_mpy(firmware_qstr_idents, compiled_modules):
         print()
 
     print("#if MICROPY_PY_BUILTINS_FLOAT")
+    print(
+        "// Workaround a bug in Windows SDK version 10.0.26100.0, where NAN is no longer constant."
+    )
+    print("#if defined(_MSC_VER) && !defined(_UCRT_NOISY_NAN)")
+    print("#define _UCRT_NOISY_NAN")
+    print("#endif")
+    print("#include <math.h>")
+    print()
     print("typedef struct _mp_obj_float_t {")
     print("    mp_obj_base_t base;")
     print("    mp_float_t value;")
