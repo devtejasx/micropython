@@ -124,6 +124,13 @@ mp_obj_t mp_parse_num_integer(const char *restrict str_, size_t len, int base, m
         if (PARSED_INT_MUL_OVERFLOW(parsed_val, base, &parsed_val)) {
             goto overflow;
         }
+        #if MICROPY_LONGINT_IMPL == MICROPY_LONGINT_IMPL_LONGLONG
+        // parsed_val is unsigned long long here and the add below could wrap
+        // around to a value that fits, so check before adding the digit too
+        if (!PARSED_INT_FITS(parsed_val)) {
+            goto overflow;
+        }
+        #endif
         parsed_val += dig;
         if (!PARSED_INT_FITS(parsed_val)) {
             goto overflow;
