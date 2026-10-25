@@ -1186,7 +1186,13 @@ static inline mp_obj_t mp_obj_new_float_from_d(double o) {
 mp_int_t mp_float_hash(mp_float_t val);
 #else
 static inline mp_int_t mp_float_hash(mp_float_t val) {
-    return (mp_int_t)val;
+    // Converting a float to an integer is undefined behaviour if the truncated
+    // value does not fit, which includes inf and nan.  MP_INT_MIN is a power of
+    // two, so it and its negation are exactly representable as a float.
+    if (val >= (mp_float_t)MP_INT_MIN && val < -(mp_float_t)MP_INT_MIN) {
+        return (mp_int_t)val;
+    }
+    return 0;
 }
 #endif
 mp_obj_t mp_obj_float_binary_op(mp_binary_op_t op, mp_float_t lhs_val, mp_obj_t rhs); // can return MP_OBJ_NULL if op not supported
